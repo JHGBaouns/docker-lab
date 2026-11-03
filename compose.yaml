@@ -1,0 +1,515 @@
+{
+  "name": "docker-lab",
+  "services": {
+    "traefik": {
+      "image": "${TRAEFIK_IMAGE:-traefik:v3.6}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "command": [
+        "--providers.docker=true",
+        "--providers.docker.exposedbydefault=false",
+        "--providers.file.filename=/etc/traefik/dynamic.yml",
+        "--entrypoints.web.address=:80",
+        "--entrypoints.web.http.redirections.entrypoint.to=websecure",
+        "--entrypoints.web.http.redirections.entrypoint.scheme=https",
+        "--entrypoints.websecure.address=:443",
+        "--entrypoints.metrics.address=:8082",
+        "--metrics.prometheus=true",
+        "--metrics.prometheus.entrypoint=metrics",
+        "--api.dashboard=true",
+        "--accesslog=true"
+      ],
+      "ports": [
+        "${BIND_IP:-0.0.0.0}:80:80",
+        "${BIND_IP:-0.0.0.0}:443:443"
+      ],
+      "volumes": [
+        "/var/run/docker.sock:/var/run/docker.sock:ro",
+        "./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro"
+      ],
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.traefik.rule": "Host(`traefik.${DOMAIN}`)",
+        "traefik.http.routers.traefik.entrypoints": "websecure",
+        "traefik.http.routers.traefik.tls": "true",
+        "traefik.http.services.traefik.loadbalancer.server.port": "8080",
+        "traefik.http.routers.traefik.middlewares": "authentik@file",
+        "traefik.http.routers.traefik.service": "api@internal"
+      }
+    },
+    "postgres": {
+      "image": "postgres:16-alpine",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "environment": {
+        "POSTGRES_USER": "authentik",
+        "POSTGRES_DB": "authentik",
+        "POSTGRES_PASSWORD": "${PG_PASS:?Set PG_PASS}"
+      },
+      "volumes": [
+        "postgres:/var/lib/postgresql/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U authentik -d authentik"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "authentik": {
+      "image": "${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2026.8.5}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "command": "server",
+      "shm_size": "512mb",
+      "environment": {
+        "AUTHENTIK_POSTGRESQL__HOST": "postgres",
+        "AUTHENTIK_POSTGRESQL__USER": "authentik",
+        "AUTHENTIK_POSTGRESQL__NAME": "authentik",
+        "AUTHENTIK_POSTGRESQL__PASSWORD": "${PG_PASS:?Set PG_PASS}",
+        "AUTHENTIK_SECRET_KEY": "${AUTHENTIK_SECRET_KEY:?Set secret}",
+        "AUTHENTIK_BOOTSTRAP_PASSWORD": "${AUTHENTIK_PASSWORD:?Set password}",
+        "AUTHENTIK_BOOTSTRAP_EMAIL": "${ADMIN_EMAIL:-admin@example.invalid}",
+        "LAB_DOMAIN": "${DOMAIN}",
+        "LAB_AUTH_URL": "https://auth.${DOMAIN}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      },
+      "volumes": [
+        "authentik-data:/data",
+        "./authentik/blueprints:/blueprints/custom:ro"
+      ],
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.authentik.rule": "Host(`auth.${DOMAIN}`)",
+        "traefik.http.routers.authentik.entrypoints": "websecure",
+        "traefik.http.routers.authentik.tls": "true",
+        "traefik.http.services.authentik.loadbalancer.server.port": "9000"
+      }
+    },
+    "authentik-worker": {
+      "image": "${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2026.8.5}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "command": "worker",
+      "shm_size": "512mb",
+      "environment": {
+        "AUTHENTIK_POSTGRESQL__HOST": "postgres",
+        "AUTHENTIK_POSTGRESQL__USER": "authentik",
+        "AUTHENTIK_POSTGRESQL__NAME": "authentik",
+        "AUTHENTIK_POSTGRESQL__PASSWORD": "${PG_PASS:?Set PG_PASS}",
+        "AUTHENTIK_SECRET_KEY": "${AUTHENTIK_SECRET_KEY:?Set secret}",
+        "AUTHENTIK_BOOTSTRAP_PASSWORD": "${AUTHENTIK_PASSWORD:?Set password}",
+        "AUTHENTIK_BOOTSTRAP_EMAIL": "${ADMIN_EMAIL:-admin@example.invalid}",
+        "LAB_DOMAIN": "${DOMAIN}",
+        "LAB_AUTH_URL": "https://auth.${DOMAIN}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      },
+      "volumes": [
+        "authentik-data:/data",
+        "./authentik/blueprints:/blueprints/custom:ro"
+      ]
+    },
+    "grafana": {
+      "image": "${GRAFANA_IMAGE:-grafana/grafana:12.3.0}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "environment": {
+        "GF_SECURITY_ADMIN_PASSWORD": "${GRAFANA_PASSWORD:?Set password}",
+        "GF_SERVER_ROOT_URL": "https://grafana.${DOMAIN}",
+        "GF_USERS_ALLOW_SIGN_UP": "false",
+        "GF_AUTH_PROXY_ENABLED": "true",
+        "GF_AUTH_PROXY_HEADER_NAME": "X-authentik-username",
+        "GF_AUTH_PROXY_AUTO_SIGN_UP": "true",
+        "GF_USERS_AUTO_ASSIGN_ORG_ROLE": "Viewer"
+      },
+      "volumes": [
+        "grafana:/var/lib/grafana",
+        "./grafana/provisioning:/etc/grafana/provisioning:ro"
+      ],
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.grafana.rule": "Host(`grafana.${DOMAIN}`)",
+        "traefik.http.routers.grafana.entrypoints": "websecure",
+        "traefik.http.routers.grafana.tls": "true",
+        "traefik.http.services.grafana.loadbalancer.server.port": "3000",
+        "traefik.http.routers.grafana.middlewares": "authentik@file"
+      }
+    },
+    "prometheus": {
+      "image": "${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "command": [
+        "--config.file=/etc/prometheus/prometheus.yml",
+        "--storage.tsdb.path=/prometheus",
+        "--storage.tsdb.retention.time=15d",
+        "--web.external-url=https://prometheus.${DOMAIN}"
+      ],
+      "volumes": [
+        "prometheus:/prometheus",
+        "./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      ],
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.prometheus.rule": "Host(`prometheus.${DOMAIN}`)",
+        "traefik.http.routers.prometheus.entrypoints": "websecure",
+        "traefik.http.routers.prometheus.tls": "true",
+        "traefik.http.services.prometheus.loadbalancer.server.port": "9090",
+        "traefik.http.routers.prometheus.middlewares": "authentik@file"
+      }
+    },
+    "loki": {
+      "image": "${LOKI_IMAGE:-grafana/loki:3.6.0}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "command": [
+        "-config.file=/etc/loki/config.yml"
+      ],
+      "volumes": [
+        "loki:/loki",
+        "./loki/config.yml:/etc/loki/config.yml:ro"
+      ]
+    },
+    "alloy": {
+      "image": "${ALLOY_IMAGE:-grafana/alloy:v1.11.0}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "command": [
+        "run",
+        "--server.http.listen-addr=0.0.0.0:12345",
+        "--storage.path=/var/lib/alloy",
+        "/etc/alloy/config.alloy"
+      ],
+      "volumes": [
+        "/var/run/docker.sock:/var/run/docker.sock:ro",
+        "./alloy/config.alloy:/etc/alloy/config.alloy:ro",
+        "alloy:/var/lib/alloy"
+      ]
+    },
+    "checkmk": {
+      "image": "${CHECKMK_IMAGE:-checkmk/check-mk-raw:2.4.0-latest}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "environment": {
+        "CMK_SITE_ID": "cmk",
+        "CMK_PASSWORD": "${CHECKMK_PASSWORD:?Set password}",
+        "TZ": "Europe/Stockholm"
+      },
+      "volumes": [
+        "checkmk:/omd/sites"
+      ],
+      "tmpfs": [
+        "/opt/omd/sites/cmk/tmp:uid=1000,gid=1000"
+      ],
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.checkmk.rule": "Host(`checkmk.${DOMAIN}`)",
+        "traefik.http.routers.checkmk.entrypoints": "websecure",
+        "traefik.http.routers.checkmk.tls": "true",
+        "traefik.http.services.checkmk.loadbalancer.server.port": "5000",
+        "traefik.http.routers.checkmk.middlewares": "authentik@file"
+      }
+    },
+    "mongo": {
+      "image": "mongo:7",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "environment": {
+        "MONGO_INITDB_ROOT_USERNAME": "komodo",
+        "MONGO_INITDB_ROOT_PASSWORD": "${MONGO_PASSWORD:?Set password}"
+      },
+      "volumes": [
+        "mongo:/data/db"
+      ],
+      "labels": {
+        "komodo.skip": ""
+      }
+    },
+    "komodo": {
+      "image": "${KOMODO_CORE_IMAGE:-ghcr.io/moghtech/komodo-core:2}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "init": true,
+      "depends_on": [
+        "mongo"
+      ],
+      "environment": {
+        "KOMODO_DATABASE_ADDRESS": "mongo:27017",
+        "KOMODO_DATABASE_USERNAME": "komodo",
+        "KOMODO_DATABASE_PASSWORD": "${MONGO_PASSWORD:?Set password}",
+        "KOMODO_HOST": "https://komodo.${DOMAIN}",
+        "KOMODO_LOCAL_AUTH": "true",
+        "KOMODO_INIT_ADMIN_USERNAME": "admin",
+        "KOMODO_INIT_ADMIN_PASSWORD": "${KOMODO_PASSWORD:?Set password}",
+        "KOMODO_DISABLE_USER_REGISTRATION": "true",
+        "KOMODO_FIRST_SERVER_NAME": "Local",
+        "KOMODO_PERIPHERY_PUBLIC_KEY": "file:/config/keys/periphery.pub",
+        "KOMODO_JWT_SECRET": "${KOMODO_JWT_SECRET:?Set secret}",
+        "KOMODO_WEBHOOK_SECRET": "${KOMODO_WEBHOOK_SECRET:?Set secret}"
+      },
+      "volumes": [
+        "komodo-keys:/config/keys",
+        "komodo-backups:/backups"
+      ],
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.komodo.rule": "Host(`komodo.${DOMAIN}`)",
+        "traefik.http.routers.komodo.entrypoints": "websecure",
+        "traefik.http.routers.komodo.tls": "true",
+        "traefik.http.services.komodo.loadbalancer.server.port": "9120",
+        "traefik.http.routers.komodo.middlewares": "authentik@file",
+        "komodo.skip": ""
+      }
+    },
+    "periphery": {
+      "image": "${KOMODO_PERIPHERY_IMAGE:-ghcr.io/moghtech/komodo-periphery:2}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "init": true,
+      "depends_on": [
+        "komodo"
+      ],
+      "environment": {
+        "PERIPHERY_CORE_ADDRESS": "ws://komodo:9120",
+        "PERIPHERY_CONNECT_AS": "Local",
+        "PERIPHERY_CORE_PUBLIC_KEYS": "file:/config/keys/core.pub",
+        "PERIPHERY_ROOT_DIRECTORY": "${KOMODO_ROOT:-/etc/komodo}"
+      },
+      "volumes": [
+        "komodo-keys:/config/keys",
+        "/var/run/docker.sock:/var/run/docker.sock",
+        "/proc:/proc",
+        "${KOMODO_ROOT:-/etc/komodo}:${KOMODO_ROOT:-/etc/komodo}"
+      ],
+      "labels": {
+        "komodo.skip": ""
+      }
+    },
+    "dozzle": {
+      "image": "${DOZZLE_IMAGE:-amir20/dozzle:v8.14.0}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "volumes": [
+        "/var/run/docker.sock:/var/run/docker.sock:ro"
+      ],
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.dozzle.rule": "Host(`dozzle.${DOMAIN}`)",
+        "traefik.http.routers.dozzle.entrypoints": "websecure",
+        "traefik.http.routers.dozzle.tls": "true",
+        "traefik.http.services.dozzle.loadbalancer.server.port": "8080",
+        "traefik.http.routers.dozzle.middlewares": "authentik@file"
+      }
+    },
+    "homepage": {
+      "image": "${HOMEPAGE_IMAGE:-ghcr.io/gethomepage/homepage:v1.6.0}",
+      "restart": "unless-stopped",
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "environment": {
+        "HOMEPAGE_ALLOWED_HOSTS": "home.${DOMAIN}",
+        "HOMEPAGE_VAR_DOMAIN": "${DOMAIN}"
+      },
+      "volumes": [
+        "./homepage:/app/config"
+      ],
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.homepage.rule": "Host(`home.${DOMAIN}`)",
+        "traefik.http.routers.homepage.entrypoints": "websecure",
+        "traefik.http.routers.homepage.tls": "true",
+        "traefik.http.services.homepage.loadbalancer.server.port": "3000",
+        "traefik.http.routers.homepage.middlewares": "authentik@file"
+      }
+    },
+    "code-server": {
+      "image": "${CODE_SERVER_IMAGE:-codercom/code-server:4.144.0}",
+      "restart": "unless-stopped",
+      "init": true,
+      "networks": [
+        "lab"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "environment": {
+        "PASSWORD": "${CODE_SERVER_PASSWORD:?Set CODE_SERVER_PASSWORD}"
+      },
+      "command": [
+        "--bind-addr",
+        "0.0.0.0:8080",
+        "--auth",
+        "password",
+        "--disable-telemetry",
+        "/home/coder/project"
+      ],
+      "volumes": [
+        "code-server-home:/home/coder"
+      ],
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.code-server.rule": "Host(`code.${DOMAIN}`)",
+        "traefik.http.routers.code-server.entrypoints": "websecure",
+        "traefik.http.routers.code-server.tls": "true",
+        "traefik.http.routers.code-server.middlewares": "authentik@file",
+        "traefik.http.services.code-server.loadbalancer.server.port": "8080"
+      }
+    }
+  },
+  "networks": {
+    "lab": {}
+  },
+  "volumes": {
+    "postgres": {},
+    "authentik-data": {},
+    "grafana": {},
+    "prometheus": {},
+    "loki": {},
+    "alloy": {},
+    "checkmk": {},
+    "mongo": {},
+    "komodo-keys": {},
+    "komodo-backups": {},
+    "code-server-home": {}
+  }
+}

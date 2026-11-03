@@ -1,0 +1,28 @@
+version: 1
+metadata:
+  name: Docker lab domain authentication
+entries:
+  - model: authentik_providers_proxy.proxyprovider
+    id: provider
+    identifiers:
+      name: lab
+    attrs:
+      mode: forward_domain
+      external_host: !Env LAB_AUTH_URL
+      cookie_domain: !Env LAB_DOMAIN
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+  - model: authentik_core.application
+    identifiers:
+      slug: lab
+    attrs:
+      name: Docker lab
+      provider: !KeyOf provider
+  - model: authentik_outposts.outpost
+    identifiers:
+      name: authentik Embedded Outpost
+    attrs:
+      providers:
+        - !KeyOf provider
+      config:
+        authentik_host: !Env LAB_AUTH_URL

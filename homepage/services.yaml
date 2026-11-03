@@ -1,0 +1,54 @@
+[
+  {
+    "Lab": [
+      {
+        "Grafana": {
+          "href": "https://grafana.{{HOMEPAGE_VAR_DOMAIN}}",
+          "description": "Metrics och loggar"
+        }
+      },
+      {
+        "Prometheus": {
+          "href": "https://prometheus.{{HOMEPAGE_VAR_DOMAIN}}",
+          "description": "Metrics"
+        }
+      },
+      {
+        "Checkmk": {
+          "href": "https://checkmk.{{HOMEPAGE_VAR_DOMAIN}}/cmk/",
+          "description": "Infrastrukturovervakning"
+        }
+      },
+      {
+        "Komodo": {
+          "href": "https://komodo.{{HOMEPAGE_VAR_DOMAIN}}",
+          "description": "Dockerhantering"
+        }
+      },
+      {
+        "Authentik": {
+          "href": "https://auth.{{HOMEPAGE_VAR_DOMAIN}}",
+          "description": "Identitet"
+        }
+      },
+      {
+        "Traefik": {
+          "href": "https://traefik.{{HOMEPAGE_VAR_DOMAIN}}/dashboard/",
+          "description": "Proxy"
+        }
+      },
+      {
+        "Dozzle": {
+          "href": "https://dozzle.{{HOMEPAGE_VAR_DOMAIN}}",
+          "description": "Containerloggar"
+        }
+      },
+      {
+        "Code-server": {
+          "href": "https://code.{{HOMEPAGE_VAR_DOMAIN}}",
+          "description": "VS Code i webblasaren"
+        }
+      }
+    ]
+  }
+]
